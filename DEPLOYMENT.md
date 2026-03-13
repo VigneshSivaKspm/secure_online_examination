@@ -13,18 +13,32 @@
 4. Click "Import"
 
 ### 2. Configure Environment Variables
-In Vercel Project Settings → Environment Variables, add:
+**Important**: Set environment variables directly in Vercel Dashboard, NOT in code.
 
-```
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_auth_domain
-VITE_FIREBASE_PROJECT_ID=your_project_id
-VITE_FIREBASE_STORAGE_BUCKET=your_storage_bucket
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
-```
+**Steps:**
+1. Go to your Vercel Project Dashboard
+2. Click **Settings** → **Environment Variables**
+3. Click **Add New** and enter each variable:
 
-Get these values from your Firebase Console → Project Settings → Web App Configuration.
+| Variable | Value |
+|----------|-------|
+| `VITE_FIREBASE_API_KEY` | Your API Key from Firebase |
+| `VITE_FIREBASE_AUTH_DOMAIN` | your-project.firebaseapp.com |
+| `VITE_FIREBASE_PROJECT_ID` | Your Project ID |
+| `VITE_FIREBASE_STORAGE_BUCKET` | your-bucket.appspot.com |
+| `VITE_FIREBASE_MESSAGING_SENDER_ID` | Your Sender ID |
+| `VITE_FIREBASE_APP_ID` | Your App ID |
+
+4. Click **Save**
+5. Redeploy your project (push to GitHub or click "Redeploy" in Vercel)
+
+**How to find Firebase credentials:**
+- Go to [Firebase Console](https://console.firebase.google.com)
+- Select your project
+- Click ⚙️ → **Project Settings**
+- Scroll to "Your apps" section
+- Click on your web app
+- Copy all values under "Firebase SDK snippet"
 
 ### 3. Auto Deploy
 - Vercel automatically deploys on every push to `main` branch
