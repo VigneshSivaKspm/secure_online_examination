@@ -9,8 +9,6 @@ import {
   query,
   where,
   onSnapshot,
-  orderBy,
-  limit,
   getDocs,
   doc,
   setDoc,
@@ -103,18 +101,23 @@ export const subscribeToStudentMessages = (
     const q = query(
       collection(db, 'chat_messages'),
       where('examId', '==', examId),
-      where('studentIds', 'array-contains', studentId),
-      orderBy('timestamp', 'desc'),
-      limit(50)
+      where('studentIds', 'array-contains', studentId)
     );
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const messages: ChatMessage[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        } as ChatMessage));
+        const messages: ChatMessage[] = snapshot.docs
+          .map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          } as ChatMessage))
+          .sort((a, b) => {
+            const aTime = a.timestamp?.toDate?.().getTime() || 0;
+            const bTime = b.timestamp?.toDate?.().getTime() || 0;
+            return bTime - aTime;
+          })
+          .slice(0, 50);
 
         callback(messages);
       },
@@ -143,16 +146,21 @@ export const subscribeToNotifications = (
     const q = query(
       collection(db, 'notifications'),
       where('examId', '==', examId),
-      where('studentIds', 'array-contains', studentId),
-      where('dismissed', '==', false),
-      orderBy('timestamp', 'desc')
+      where('studentIds', 'array-contains', studentId)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const notifications = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      const notifications = snapshot.docs
+        .filter((doc) => doc.data().dismissed !== true)
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        } as any))
+        .sort((a, b) => {
+          const aTime = a.timestamp?.toDate?.().getTime() || 0;
+          const bTime = b.timestamp?.toDate?.().getTime() || 0;
+          return bTime - aTime;
+        });
 
       callback(notifications);
     });
@@ -272,20 +280,28 @@ export const subscribeToActiveSessions = (
   errorCallback?: (error: any) => void
 ) => {
   try {
+    // Query only by examId to avoid composite index requirement
+    // Filter isActive and sort in-memory instead
     const q = query(
       collection(db, 'active_sessions'),
-      where('examId', '==', examId),
-      where('isActive', '==', true),
-      orderBy('lastHeartbeat', 'desc')
+      where('examId', '==', examId)
     );
 
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const sessions: StudentSession[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        } as unknown as StudentSession));
+        // Filter isActive and sort by lastHeartbeat in memory
+        const sessions: StudentSession[] = snapshot.docs
+          .filter((doc) => doc.data().isActive === true)
+          .map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          } as unknown as StudentSession))
+          .sort((a, b) => {
+            const aTime = a.lastHeartbeat?.toDate?.().getTime() || 0;
+            const bTime = b.lastHeartbeat?.toDate?.().getTime() || 0;
+            return bTime - aTime; // Descending order
+          });
 
         callback(sessions);
       },
@@ -354,19 +370,26 @@ export const subscribeToAlertEvents = (
   callback: (alerts: AlertEvent[]) => void
 ) => {
   try {
+    // Query without the complex composite filters to avoid index requirements
+    // Filter severity and limit in memory instead
     const q = query(
       collection(db, 'alert_events'),
-      where('examId', '==', examId),
-      where('severity', '==', 'critical'),
-      orderBy('timestamp', 'desc'),
-      limit(100)
+      where('examId', '==', examId)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const alerts: AlertEvent[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      } as AlertEvent));
+      const alerts: AlertEvent[] = snapshot.docs
+        .filter((doc) => doc.data().severity === 'critical')
+        .map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        } as AlertEvent))
+        .sort((a, b) => {
+          const aTime = a.timestamp?.toDate?.().getTime() || 0;
+          const bTime = b.timestamp?.toDate?.().getTime() || 0;
+          return bTime - aTime; // Descending order
+        })
+        .slice(0, 100); // Limit to 100
 
       callback(alerts);
     });
@@ -424,16 +447,21 @@ export const getMessageHistory = async (
   try {
     const q = query(
       collection(db, 'chat_messages'),
-      where('examId', '==', examId),
-      orderBy('timestamp', 'desc'),
-      limit(Math.min(maxResults, 100))
+      where('examId', '==', examId)
     );
 
     const snapshot = await getDocs(q);
-    const messages: ChatMessage[] = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    } as ChatMessage));
+    const messages: ChatMessage[] = snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      } as ChatMessage))
+      .sort((a, b) => {
+        const aTime = a.timestamp?.toDate?.().getTime() || 0;
+        const bTime = b.timestamp?.toDate?.().getTime() || 0;
+        return bTime - aTime;
+      })
+      .slice(0, Math.min(maxResults, 100));
 
     return messages;
   } catch (error) {
@@ -565,18 +593,23 @@ export const subscribeToSessionActivities = (
 ) => {
   try {
     const q = query(
-      collection(db, 'live_sessions', sessionId, 'activities'),
-      orderBy('timestamp', 'desc'),
-      limit(50)
+      collection(db, 'live_sessions', sessionId, 'activities')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const activities: ActivityEvent[] = snapshot.docs.map((doc) => ({
-        timestamp: doc.data().timestamp,
-        type: doc.data().type as ActivityEvent['type'],
-        severity: doc.data().severity as ActivityEvent['severity'],
-        details: doc.data().details,
-      }));
+      const activities: ActivityEvent[] = snapshot.docs
+        .map((doc) => ({
+          timestamp: doc.data().timestamp,
+          type: doc.data().type as ActivityEvent['type'],
+          severity: doc.data().severity as ActivityEvent['severity'],
+          details: doc.data().details,
+        }))
+        .sort((a, b) => {
+          const aTime = a.timestamp?.toDate?.().getTime() || 0;
+          const bTime = b.timestamp?.toDate?.().getTime() || 0;
+          return bTime - aTime;
+        })
+        .slice(0, 50);
       callback(activities);
     });
 
