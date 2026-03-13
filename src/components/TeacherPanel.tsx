@@ -3,14 +3,17 @@ import { useAuth } from '../context/AuthContext';
 import { Navbar } from './Navbar';
 import { ResultsTable } from './ResultsTable';
 import { QuestionForm } from './QuestionForm';
+import { LiveFeed } from './LiveFeed';
 import type { ExamQuestion, StudentResult } from '../types/exam';
+import type { StudentSession } from '../types/chat';
+import { sendMessageToSession, subscribeToActiveSessions } from '../services/chatService';
 import { db } from '../config/firebase';
 import {
   collection, query, where, getDocs,
   addDoc, updateDoc, doc, deleteDoc,
 } from 'firebase/firestore';
 
-type MainTab = 'manage-exams' | 'create-exam' | 'edit-exam' | 'manage-students' | 'results';
+type MainTab = 'manage-exams' | 'create-exam' | 'edit-exam' | 'manage-students' | 'monitoring' | 'results';
 type EditSubTab = 'questions' | 'schedule' | 'students' | 'publish';
 
 export function TeacherPanel() {
@@ -25,7 +28,6 @@ export function TeacherPanel() {
   // ── Create-Exam form state ───────────────────────────────────
   const [examTitle, setExamTitle] = useState('');
   const [examDescription, setExamDescription] = useState('');
-  const [examDuration, setExamDuration] = useState(60);
 
   // ── Exam list ────────────────────────────────────────────────
   const [exams, setExams] = useState<any[]>([]);
@@ -35,7 +37,8 @@ export function TeacherPanel() {
   // ── Schedule state (per exam editor) ───────────────────────
   const [scheduleStartDate, setScheduleStartDate] = useState('');
   const [scheduleStartTime, setScheduleStartTime] = useState('');
-  const [scheduleDuration, setScheduleDuration] = useState(60);
+  const [scheduleEndDate, setScheduleEndDate] = useState('');
+  const [scheduleEndTime, setScheduleEndTime] = useState('');
 
   // ── Students state ──────────────────────────────────────────
   const [students, setStudents] = useState<any[]>([]);
@@ -43,6 +46,14 @@ export function TeacherPanel() {
 
   // ── Results (fetched by ResultsTable) ───────────────────────
   const [results] = useState<StudentResult[]>([]);
+
+  // ── Monitoring state ─────────────────────────────────────────
+  const [monitoringExamId, setMonitoringExamId] = useState<string>('');
+  const [monitorSessions, setMonitorSessions] = useState<StudentSession[]>([]);
+  const [msgText, setMsgText] = useState('');
+  const [msgType, setMsgType] = useState<'message' | 'warning'>('message');
+  const [msgTarget, setMsgTarget] = useState<string>('all');
+  const [msgSending, setMsgSending] = useState(false);
 
   // ══════════════════════════════════════════════════════════
   // Effects
@@ -97,8 +108,6 @@ export function TeacherPanel() {
     const exam = exams.find((e) => e.id === selectedExamId);
     if (!exam) return;
 
-    setScheduleDuration(exam.durationMinutes ?? 60);
-
     const parseFirestoreDate = (val: any): Date | null => {
       if (!val) return null;
       if (val.toDate) return val.toDate();
@@ -112,6 +121,15 @@ export function TeacherPanel() {
     } else {
       setScheduleStartDate('');
       setScheduleStartTime('');
+    }
+
+    const end = parseFirestoreDate(exam.endAt);
+    if (end) {
+      setScheduleEndDate(end.toISOString().substring(0, 10));
+      setScheduleEndTime(end.toTimeString().substring(0, 5));
+    } else {
+      setScheduleEndDate('');
+      setScheduleEndTime('');
     }
 
     setEnrolledStudentIds(new Set<string>(exam.enrolledStudentIds ?? []));
@@ -136,6 +154,41 @@ export function TeacherPanel() {
     };
     run();
   }, []);
+
+  // Subscribe to active sessions for the selected monitoring exam
+  useEffect(() => {
+    if (!monitoringExamId) {
+      setMonitorSessions([]);
+      return;
+    }
+    const unsubscribe = subscribeToActiveSessions(
+      monitoringExamId,
+      (sessions) => setMonitorSessions(sessions),
+    );
+    return () => unsubscribe?.();
+  }, [monitoringExamId]);
+
+  // ── Send message/warning to student(s) ──────────────────────
+  const handleSendMessage = async () => {
+    if (!msgText.trim()) return;
+    setMsgSending(true);
+    try {
+      const targets =
+        msgTarget === 'all'
+          ? monitorSessions
+          : monitorSessions.filter((s) => s.sessionId === msgTarget);
+      for (const session of targets) {
+        await sendMessageToSession(session.sessionId, msgText.trim(), msgType);
+      }
+      setMsgText('');
+      showSuccess();
+    } catch (e) {
+      console.error('Error sending message:', e);
+      alert('Failed to send message. Please try again.');
+    } finally {
+      setMsgSending(false);
+    }
+  };
 
   // ══════════════════════════════════════════════════════════
   // Helpers
@@ -169,7 +222,6 @@ export function TeacherPanel() {
       const payload = {
         title: examTitle.trim(),
         description: examDescription.trim(),
-        durationMinutes: examDuration,
         createdBy: user.uid,
         createdAt: new Date(),
         status: 'draft',
@@ -177,12 +229,12 @@ export function TeacherPanel() {
         totalPoints: 0,
         questions: 0,
         startAt: null,
+        endAt: null,
       };
       const docRef = await addDoc(collection(db, 'exams'), payload);
       setExams((prev) => [...prev, { ...payload, id: docRef.id }]);
       setExamTitle('');
       setExamDescription('');
-      setExamDuration(60);
       showSuccess();
       openExamEditor(docRef.id, 'questions');
     } catch (e) {
@@ -262,20 +314,16 @@ export function TeacherPanel() {
 
   const handleSaveSchedule = async () => {
     if (!selectedExamId) return;
+    if (!scheduleStartDate || !scheduleStartTime) { alert('Please set a start date and time'); return; }
+    if (!scheduleEndDate || !scheduleEndTime) { alert('Please set an end date and time'); return; }
+    const startAt = new Date(`${scheduleStartDate}T${scheduleStartTime}`);
+    const endAt = new Date(`${scheduleEndDate}T${scheduleEndTime}`);
+    if (endAt <= startAt) { alert('End time must be after start time'); return; }
     try {
-      const startAt =
-        scheduleStartDate && scheduleStartTime
-          ? new Date(`${scheduleStartDate}T${scheduleStartTime}`)
-          : null;
-      await updateDoc(doc(db, 'exams', selectedExamId), {
-        startAt,
-        durationMinutes: scheduleDuration,
-      });
+      await updateDoc(doc(db, 'exams', selectedExamId), { startAt, endAt });
       setExams((prev) =>
         prev.map((e) =>
-          e.id === selectedExamId
-            ? { ...e, startAt, durationMinutes: scheduleDuration }
-            : e
+          e.id === selectedExamId ? { ...e, startAt, endAt } : e
         )
       );
       showSuccess();
@@ -433,6 +481,7 @@ export function TeacherPanel() {
               {(
                 [
                   { tab: 'manage-students', icon: '👥', label: 'Students' },
+                  { tab: 'monitoring', icon: '📹', label: 'Monitoring' },
                   { tab: 'results', icon: '📊', label: 'Results' },
                 ] as { tab: MainTab; icon: string; label: string }[]
               ).map(({ tab, icon, label }) => (
@@ -547,8 +596,8 @@ export function TeacherPanel() {
                               { label: 'Questions', value: exam.questions ?? 0, color: 'text-indigo-600' },
                               { label: 'Total Pts', value: exam.totalPoints ?? 0, color: 'text-emerald-600' },
                               {
-                                label: 'Duration',
-                                value: `${exam.durationMinutes ?? '—'}m`,
+                                label: 'Start',
+                                value: exam.startAt ? (exam.startAt.toDate ? exam.startAt.toDate() : new Date(exam.startAt)).toLocaleDateString() : '—',
                                 color: 'text-blue-600',
                               },
                               {
@@ -609,6 +658,7 @@ export function TeacherPanel() {
                         {exam.startAt && (
                           <div className="mt-3 flex gap-4 text-xs text-gray-400 font-medium border-t border-gray-100 pt-3 px-5 pb-4">
                             <span>🕐 Starts: {formatFirestoreDate(exam.startAt)}</span>
+                            {exam.endAt && <span>🕑 Ends: {formatFirestoreDate(exam.endAt)}</span>}
                           </div>
                         )}
                       </div>
@@ -654,23 +704,6 @@ export function TeacherPanel() {
                       placeholder="Topics covered, instructions for students…"
                       className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-none"
                     />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                      Duration (minutes) *
-                    </label>
-                    <input
-                      type="number"
-                      min={5}
-                      max={300}
-                      value={examDuration}
-                      onChange={(e) => setExamDuration(Number(e.target.value))}
-                      className="w-32 px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Time allowed for students to complete the exam
-                    </p>
                   </div>
 
                   <div className="flex gap-3 pt-2">
@@ -846,38 +879,18 @@ export function TeacherPanel() {
                 {editSubTab === 'schedule' && (
                   <div className="max-w-lg space-y-4">
                     <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-5">
-                      <h2 className="font-bold text-gray-900 text-lg">Exam Schedule</h2>
+                      <h2 className="font-bold text-gray-900 text-lg">📅 Exam Schedule</h2>
+                      <p className="text-sm text-gray-500">Set the exact window during which students can take this exam.</p>
 
                       <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                          Duration (minutes) *
-                        </label>
-                        <input
-                          type="number"
-                          min={5}
-                          max={300}
-                          value={scheduleDuration}
-                          onChange={(e) => setScheduleDuration(Number(e.target.value))}
-                          className="w-36 px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                            Start Date
-                          </label>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">🕐 Start Date &amp; Time *</label>
+                        <div className="grid grid-cols-2 gap-3">
                           <input
                             type="date"
                             value={scheduleStartDate}
                             onChange={(e) => setScheduleStartDate(e.target.value)}
                             className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                           />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-bold text-gray-700 mb-1.5">
-                            Start Time
-                          </label>
                           <input
                             type="time"
                             value={scheduleStartTime}
@@ -886,9 +899,30 @@ export function TeacherPanel() {
                           />
                         </div>
                       </div>
-                      <p className="text-xs text-gray-400">
-                        Leave blank to allow students to start at any time.
-                      </p>
+
+                      <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1.5">🕑 End Date &amp; Time *</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <input
+                            type="date"
+                            value={scheduleEndDate}
+                            onChange={(e) => setScheduleEndDate(e.target.value)}
+                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                          />
+                          <input
+                            type="time"
+                            value={scheduleEndTime}
+                            onChange={(e) => setScheduleEndTime(e.target.value)}
+                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                          />
+                        </div>
+                      </div>
+
+                      {scheduleStartDate && scheduleStartTime && scheduleEndDate && scheduleEndTime && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-700">
+                          ⏰ Students can take this exam from <strong>{scheduleStartDate} {scheduleStartTime}</strong> to <strong>{scheduleEndDate} {scheduleEndTime}</strong>
+                        </div>
+                      )}
 
                       <div className="flex gap-3 pt-2">
                         <button
@@ -1010,15 +1044,21 @@ export function TeacherPanel() {
                             ['Description', selectedExam.description || '—'],
                             ['Questions', `${examQuestions.length} question(s)`],
                             ['Total Points', `${selectedExam.totalPoints ?? 0} pts`],
-                            ['Duration', `${scheduleDuration ?? 0} minutes`],
-                            ['Enrolled Students', `${enrolledStudentIds.size} student(s)`],
-                            ['Schedule',
+                            ['Start Time',
                               scheduleStartDate && scheduleStartTime
-                                ? `Starts: ${scheduleStartDate} at ${scheduleStartTime}`
+                                ? `${scheduleStartDate} at ${scheduleStartTime}`
                                 : selectedExam.startAt
-                                ? `Starts: ${formatFirestoreDate(selectedExam.startAt)}`
-                                : 'No schedule set',
+                                ? formatFirestoreDate(selectedExam.startAt)
+                                : 'Not set',
                             ],
+                            ['End Time',
+                              scheduleEndDate && scheduleEndTime
+                                ? `${scheduleEndDate} at ${scheduleEndTime}`
+                                : selectedExam.endAt
+                                ? formatFirestoreDate(selectedExam.endAt)
+                                : 'Not set',
+                            ],
+                            ['Enrolled Students', `${enrolledStudentIds.size} student(s)`],
                           ] as [string, string][]
                         ).map(([label, value]) => (
                           <div key={label} className="flex justify-between text-sm">
@@ -1157,6 +1197,105 @@ export function TeacherPanel() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════
+                MONITORING
+            ══════════════════════════════════════════ */}
+            {activeTab === 'monitoring' && (
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                  <h1 className="text-2xl font-bold text-gray-900">Live Monitoring</h1>
+                  {exams.length > 0 && (
+                    <select
+                      value={monitoringExamId}
+                      onChange={(e) => { setMonitoringExamId(e.target.value); setMsgTarget('all'); }}
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                    >
+                      <option value="">— Select an Exam to Monitor —</option>
+                      {exams.map((e) => (
+                        <option key={e.id} value={e.id}>{e.title}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {!monitoringExamId ? (
+                  <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+                    <p className="text-4xl mb-3">📹</p>
+                    <p className="text-gray-500 font-medium">Select an exam above to start monitoring</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Live student feed */}
+                    <LiveFeed examId={monitoringExamId} />
+
+                    {/* Send message / warning panel */}
+                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                      <h2 className="text-lg font-bold text-gray-900 mb-4">📨 Send Message to Students</h2>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                        {/* Type selector */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
+                          <select
+                            value={msgType}
+                            onChange={(e) => setMsgType(e.target.value as 'message' | 'warning')}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          >
+                            <option value="message">💬 Message</option>
+                            <option value="warning">⚠️ Warning</option>
+                          </select>
+                        </div>
+
+                        {/* Target selector */}
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Send To</label>
+                          <select
+                            value={msgTarget}
+                            onChange={(e) => setMsgTarget(e.target.value)}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                          >
+                            <option value="all">All Active Students ({monitorSessions.length})</option>
+                            {monitorSessions.map((s) => (
+                              <option key={s.sessionId} value={s.sessionId}>
+                                {s.studentName} ({s.studentEmail})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Message input */}
+                      <div className="flex gap-3">
+                        <input
+                          type="text"
+                          value={msgText}
+                          onChange={(e) => setMsgText(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && !msgSending && handleSendMessage()}
+                          placeholder={msgType === 'warning' ? 'Enter warning message...' : 'Enter message to students...'}
+                          className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button
+                          onClick={handleSendMessage}
+                          disabled={msgSending || !msgText.trim() || monitorSessions.length === 0}
+                          className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                            msgType === 'warning'
+                              ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                          }`}
+                        >
+                          {msgSending ? 'Sending…' : msgType === 'warning' ? '⚠️ Send Warning' : '💬 Send'}
+                        </button>
+                      </div>
+
+                      {monitorSessions.length === 0 && (
+                        <p className="text-xs text-gray-400 mt-2">No active students right now — messages will be delivered once students join.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

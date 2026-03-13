@@ -11,6 +11,8 @@ interface ExamData {
   questions: number;
   status: 'Not Started' | 'Completed';
   score?: string;
+  startAt?: Date | null;
+  endAt?: Date | null;
 }
 
 const StudentDashboard: React.FC = () => {
@@ -50,6 +52,8 @@ const StudentDashboard: React.FC = () => {
             duration: exam.duration,
             questions: exam.questions,
             status: 'Not Started',
+            startAt: exam.startAt ?? null,
+            endAt: exam.endAt ?? null,
           }));
         setAvailableExams(formattedAvailable);
 
@@ -181,23 +185,51 @@ const StudentDashboard: React.FC = () => {
                       <p className="text-gray-500 font-medium">No exams available at the moment</p>
                     </div>
                   ) : (
-                    availableExams.map((exam) => (
-                      <div key={exam.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:border-indigo-300 transition-all group flex flex-col md:flex-row md:items-center justify-between gap-6">
-                        <div>
-                          <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight group-hover:text-indigo-600 transition-colors">{exam.title}</h3>
-                          <div className="flex gap-4 text-sm font-bold text-gray-500">
-                            <span className="flex items-center gap-1">⏱️ {exam.duration}</span>
-                            <span className="flex items-center gap-1">📝 {exam.questions} Questions</span>
+                    availableExams.map((exam) => {
+                      const now = new Date();
+                      const isScheduled = exam.startAt != null && exam.endAt != null;
+                      const notYetStarted = isScheduled && now < exam.startAt!;
+                      const windowClosed = isScheduled && now > exam.endAt!;
+                      const canStart = !notYetStarted && !windowClosed;
+
+                      return (
+                        <div key={exam.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:border-indigo-300 transition-all group flex flex-col md:flex-row md:items-center justify-between gap-6">
+                          <div className="flex-1">
+                            <h3 className="text-xl font-bold text-gray-900 mb-1 leading-tight group-hover:text-indigo-600 transition-colors">{exam.title}</h3>
+                            <div className="flex flex-wrap gap-4 text-sm font-bold text-gray-500 mt-1">
+                              {exam.startAt && (
+                                <span className="flex items-center gap-1">📅 Starts: {exam.startAt.toLocaleString()}</span>
+                              )}
+                              {exam.endAt && (
+                                <span className="flex items-center gap-1">⏰ Ends: {exam.endAt.toLocaleString()}</span>
+                              )}
+                              {!exam.startAt && (
+                                <span className="flex items-center gap-1">⏱️ {exam.duration}</span>
+                              )}
+                              <span className="flex items-center gap-1">📝 {exam.questions} Questions</span>
+                            </div>
+                            {isScheduled && (
+                              <p className={`text-xs font-bold mt-2 ${
+                                notYetStarted ? 'text-yellow-600' : windowClosed ? 'text-red-600' : 'text-green-600'
+                              }`}>
+                                {notYetStarted ? '⏳ Exam window not yet open' : windowClosed ? '❌ Exam window has closed' : '✅ Exam window is open'}
+                              </p>
+                            )}
                           </div>
+                          <button
+                            onClick={() => canStart && handleStartExam(exam.id)}
+                            disabled={!canStart}
+                            className={`px-8 py-3 rounded-xl font-bold transition-all ${
+                              canStart
+                                ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-100 active:scale-95'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            }`}
+                          >
+                            {notYetStarted ? 'Not Yet Open' : windowClosed ? 'Closed' : 'Start Exam'}
+                          </button>
                         </div>
-                        <button 
-                          onClick={() => handleStartExam(exam.id)}
-                          className="bg-indigo-600 text-white px-8 py-3 rounded-xl hover:bg-indigo-700 transition-all font-bold shadow-lg shadow-indigo-100 active:scale-95"
-                        >
-                          Start Exam
-                        </button>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </>
               )}

@@ -20,6 +20,10 @@ export interface Exam {
   totalPoints: number;
   createdAt: Date;
   createdBy: string;
+  startAt?: Date | null;
+  endAt?: Date | null;
+  status?: string;
+  enrolledStudentIds?: string[];
 }
 
 // Results types

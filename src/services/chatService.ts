@@ -511,3 +511,25 @@ export const sendBulkMessage = async (
     throw error;
   }
 };
+
+/**
+ * Send a direct message or warning to a specific student session.
+ * Writes to live_sessions/{sessionId}/messages which ExamRoom listens to.
+ */
+export const sendMessageToSession = async (
+  sessionId: string,
+  message: string,
+  type: 'message' | 'warning' = 'message'
+): Promise<void> => {
+  try {
+    await addDoc(collection(db, 'live_sessions', sessionId, 'messages'), {
+      message,
+      type,
+      timestamp: serverTimestamp(),
+    });
+    console.log('✅ Message sent to session:', sessionId);
+  } catch (error) {
+    console.error('Error sending message to session:', error);
+    throw error;
+  }
+};

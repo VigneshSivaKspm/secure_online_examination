@@ -411,6 +411,9 @@ export const fetchAvailableExams = async () => {
         totalPoints: data.totalPoints || 0,
         createdAt: data.createdAt?.toDate?.() || new Date(),
         createdBy: data.createdBy || '',
+        startAt: data.startAt?.toDate?.() ?? null,
+        endAt: data.endAt?.toDate?.() ?? null,
+        status: data.status || 'published',
       };
     });
   } catch (error) {

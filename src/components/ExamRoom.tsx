@@ -7,7 +7,7 @@ import ProctoringMonitor from './ProctoringMonitor';
 import SuspiciousActivityPopup from './SuspiciousActivityPopup';
 import ScreenLockOverlay from './ScreenLockOverlay';
 import { db } from '../config/firebase';
-import { doc, onSnapshot, collection } from 'firebase/firestore';
+import { doc, onSnapshot, collection, getDoc } from 'firebase/firestore';
 import {
   fetchRandomExamQuestions,
   calculateFinalResult,
@@ -56,6 +56,9 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({ examId, sessionId: providedS
   const [showWarningPopup, setShowWarningPopup] = useState(false);
   const [isScreenLocked, setIsScreenLocked] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const prevMessageCountRef = useRef(0);
 
   // Handle warning threshold reached (3 warnings)
   const handleWarningThresholdReached = useCallback((count: number) => {
@@ -91,6 +94,40 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({ examId, sessionId: providedS
 
   // Auto-save timer
   const autoSaveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /**
+   * Fetch exam endAt and initialise timer accordingly
+   */
+  useEffect(() => {
+    const fetchExamTiming = async () => {
+      try {
+        const examRef = doc(db, 'exams', examId);
+        const examSnap = await getDoc(examRef);
+        if (examSnap.exists()) {
+          const data = examSnap.data();
+          const endAt: Date | null = data.endAt?.toDate?.() ?? null;
+          if (endAt) {
+            const remaining = Math.max(0, Math.floor((endAt.getTime() - Date.now()) / 1000));
+            setTimeLeft(remaining);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching exam timing:', error);
+      }
+    };
+    fetchExamTiming();
+  }, [examId]);
+
+  /**
+   * Track unread chat messages
+   */
+  useEffect(() => {
+    const newCount = messages.length - prevMessageCountRef.current;
+    if (newCount > 0 && !isChatOpen) {
+      setUnreadCount((prev) => prev + newCount);
+    }
+    prevMessageCountRef.current = messages.length;
+  }, [messages, isChatOpen]);
 
   /**
    * Load exam questions on mount and register session
@@ -523,19 +560,54 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({ examId, sessionId: providedS
         </div>
       )}
 
-      {/* Teacher Messages */}
+      {/* Teacher Chat — floating panel */}
       {messages.length > 0 && (
-        <div className="bg-blue-50 border-l-4 border-blue-600 px-6 py-3 max-h-24 overflow-y-auto">
-          <div className="space-y-2">
-            {messages.map((msg) => (
-              <div key={msg.id} className={`p-2 rounded ${msg.type === 'warning' ? 'bg-orange-100 border-l-2 border-orange-600' : 'bg-blue-100 border-l-2 border-blue-600'}`}>
-                <p className="text-xs font-bold text-gray-900">
-                  {msg.type === 'warning' ? '⚠️ Warning from Teacher' : '💬 Message from Teacher'}
-                </p>
-                <p className="text-sm text-gray-800 mt-1">{msg.message}</p>
+        <div className="fixed bottom-6 right-6 z-50">
+          {isChatOpen ? (
+            <div className="bg-white rounded-xl shadow-2xl border border-gray-200 w-80 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 bg-indigo-600 text-white">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">💬</span>
+                  <span className="font-bold text-sm">Messages from Teacher</span>
+                </div>
+                <button
+                  onClick={() => setIsChatOpen(false)}
+                  className="text-white hover:text-indigo-200 text-xl leading-none font-bold"
+                >
+                  ×
+                </button>
               </div>
-            ))}
-          </div>
+              <div className="max-h-72 overflow-y-auto p-3 space-y-2 bg-gray-50">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`p-3 rounded-lg text-sm ${
+                      msg.type === 'warning'
+                        ? 'bg-orange-50 border border-orange-300'
+                        : 'bg-blue-50 border border-blue-200'
+                    }`}
+                  >
+                    <p className="font-bold text-xs mb-1">
+                      {msg.type === 'warning' ? '⚠️ Warning from Teacher' : '💬 Message from Teacher'}
+                    </p>
+                    <p className="text-gray-800">{msg.message}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setIsChatOpen(true); setUnreadCount(0); }}
+              className="relative bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-full font-bold shadow-lg flex items-center gap-2 transition-all active:scale-95"
+            >
+              💬 Teacher Messages
+              {unreadCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
       )}
 
