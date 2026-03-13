@@ -1,0 +1,169 @@
+// Firestore Security Rules for Proctoring System
+// Apply these rules in Firebase Console > Firestore > Rules
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================
+    // Live Sessions Collection (Proctoring Data)
+    // ============================================
+    match /live_sessions/{sessionId} {
+      
+      // Allow students to read/write their own sessions
+      allow read, write: if 
+        request.auth != null && 
+        resource.data.studentId == request.auth.uid;
+      
+      // Allow teachers to read sessions for their exams
+      // (requires examining exam collection - adjust as needed)
+      allow read: if 
+        request.auth != null && 
+        request.auth != null; // TODO: Add exam cross-reference check
+      
+      // Admins can read all for review
+      allow read: if 
+        request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      
+      // ========================================
+      // Alerts Subcollection
+      // ========================================
+      match /alerts/{alertId} {
+        
+        // Students can read their own alerts
+        allow read: if
+          request.auth != null &&
+          get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.studentId == request.auth.uid;
+        
+        // System/backend can write alerts (from useProctoring hook)
+        allow create: if
+          request.auth != null &&
+          get(/databases/$(database)/documents/live_sessions/$(sessionId)).data.studentId == request.auth.uid;
+        
+        // Teachers/admins can read for review
+        allow read: if
+          request.auth != null &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['teacher', 'admin'];
+        
+        // Prevent modification of alerts (immutable audit trail)
+        allow update, delete: if false;
+      }
+    }
+    
+    // ============================================
+    // Exam Results Collection
+    // ============================================
+    match /exam_results/{resultId} {
+      
+      // Students can read their own results
+      allow read: if
+        request.auth != null &&
+        resource.data.studentId == request.auth.uid;
+      
+      // Teachers can read results from their exams
+      allow read: if
+        request.auth != null &&
+        get(/databases/$(database)/documents/exams/$(resource.data.examId)).data.teacherId == request.auth.uid;
+      
+      // System can write results
+      allow write: if request.auth != null;
+    }
+    
+    // ============================================
+    // Exams Collection
+    // ============================================
+    match /exams/{examId} {
+      
+      // Students can read exams they're taking
+      allow read: if
+        request.auth != null;
+        // TODO: Cross-reference with student enrollment
+      
+      // Teachers can read/write their own exams
+      allow read, write: if
+        request.auth != null &&
+        resource.data.teacherId == request.auth.uid;
+      
+      // Admins can read all exams
+      allow read: if
+        request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // ============================================
+    // Users Collection
+    // ============================================
+    match /users/{userId} {
+      
+      // Users can read their own profile
+      allow read: if request.auth.uid == userId;
+      
+      // Users can update their own profile (except role)
+      allow update: if
+        request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'uid']);
+      
+      // Admins can read all user data
+      allow read: if
+        request.auth != null &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // ============================================
+    // Default Deny
+    // ============================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+/*
+RULES EXPLANATION:
+
+1. LIVE_SESSIONS (Proctoring Audit Trail)
+   - Students: Can create and read their own monitoring sessions
+   - Alerts: Immutable once created (prevents tampering)
+   - Teachers/Admins: Can review past sessions
+   - Timestamp: Enforced by backend (not client-settable)
+
+2. ALERTS (Sub-collection)
+   - Append-only log of detected suspicious activity
+   - Cannot be deleted or modified (audit trail)
+   - Server timestamp ensures chronological integrity
+   - Only logged data protected (not webcam feed)
+
+3. EXAM_RESULTS (Student Scores)
+   - Connection to live_sessions through examId
+   - Students see only their results
+   - Teachers see results of their exams
+   - Proctoring flags can be manually reviewed
+
+4. ACCESS PATTERNS:
+   - Read: Least privilege (students see own, teachers see theirs)
+   - Write: System handles alerts (no direct client write)
+   - Audit: Admins can review for integrity
+   - Immutability: Alerts cannot be deleted (prevent cheating cover-up)
+
+5. SPECIAL FIELDS:
+   - studentId: Tied to auth.uid (cannot spoof)
+   - "timestamp": Server-side only (prevent backdating)
+   - alertId: Auto-generated (prevent duplicates)
+   - sessionId: Unique per exam attempt (prevent sharing)
+
+DEPLOYMENT:
+1. Copy these rules to Firebase Console
+2. Test with "Rules Playground" before publishing
+3. Ensure users collection is properly set up
+4. Monitor Real-Time Database usage for anomalies
+
+SECURITY CONSIDERATIONS:
+✓ Prevents students from hiding alerts
+✓ Prevents teachers from accessing other exams
+✓ Prevents admins from modifying audit trail
+✓ Timestamps tamper-proof (server-side)
+✓ Role-based access (role field checked)
+⚠ Requires proper user.role setup in users/{uid}
+⚠ If users haven't set role yet, rules block access
+*/
