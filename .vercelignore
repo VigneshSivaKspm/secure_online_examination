@@ -1,0 +1,13 @@
+.git
+node_modules
+.env.local
+.env.*.local
+dist
+src
+public
+*.md
+eslint.config.js
+postcss.config.js
+tailwind.config.js
+tsconfig*.json
+vite.config.ts
