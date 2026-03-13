@@ -37,6 +37,21 @@ export interface StudentSession {
   timeRemaining: number; // In seconds
   isActive: boolean;
   connectionStatus: 'online' | 'offline' | 'idle';
+  cameraStatus?: 'active' | 'inactive' | 'disabled';
+  micStatus?: 'active' | 'inactive' | 'disabled';
+  screenLocked?: boolean;
+  eyeGazeStatus?: 'focused' | 'looking_away' | 'unknown';
+  recentActivity?: ActivityEvent[];
+}
+
+/**
+ * Student activity event for tracking behavior
+ */
+export interface ActivityEvent {
+  timestamp: any;
+  type: 'page_focus' | 'page_blur' | 'mouse_move' | 'key_press' | 'copy_paste' | 'right_click' | 'tab_switch' | 'answer_selected' | 'question_jumped' | 'camera_detected' | 'face_detected';
+  severity: 'normal' | 'warning' | 'critical';
+  details?: string;
 }
 
 /**

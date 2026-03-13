@@ -173,10 +173,22 @@ export function TeacherPanel() {
     if (!msgText.trim()) return;
     setMsgSending(true);
     try {
-      const targets =
-        msgTarget === 'all'
-          ? monitorSessions
-          : monitorSessions.filter((s) => s.sessionId === msgTarget);
+      let targets = monitorSessions;
+      
+      if (msgTarget === 'all_yellow') {
+        targets = monitorSessions.filter((s) => s.proctoringStatus === 'YELLOW');
+      } else if (msgTarget === 'all_red') {
+        targets = monitorSessions.filter((s) => s.proctoringStatus === 'RED');
+      } else if (msgTarget !== 'all') {
+        targets = monitorSessions.filter((s) => s.sessionId === msgTarget);
+      }
+      
+      if (targets.length === 0) {
+        alert('No students matching the selected criteria.');
+        setMsgSending(false);
+        return;
+      }
+      
       for (const session of targets) {
         await sendMessageToSession(session.sessionId, msgText.trim(), msgType);
       }
@@ -1201,19 +1213,23 @@ export function TeacherPanel() {
             )}
 
             {/* ══════════════════════════════════════════
-                MONITORING
+                MONITORING — Advanced Dashboard
             ══════════════════════════════════════════ */}
             {activeTab === 'monitoring' && (
-              <div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                  <h1 className="text-2xl font-bold text-gray-900">Live Monitoring</h1>
+              <div className="space-y-6">
+                {/* Header with exam selector */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h1 className="text-3xl font-bold text-gray-900">📹 Live Proctoring Dashboard</h1>
+                    <p className="text-gray-500 text-sm mt-1">Real-time monitoring with advanced analytics</p>
+                  </div>
                   {exams.length > 0 && (
                     <select
                       value={monitoringExamId}
                       onChange={(e) => { setMonitoringExamId(e.target.value); setMsgTarget('all'); }}
-                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                      className="border-2 border-indigo-300 rounded-lg px-4 py-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-indigo-500 bg-white hover:border-indigo-500 transition-colors"
                     >
-                      <option value="">— Select an Exam to Monitor —</option>
+                      <option value="">— Select Exam —</option>
                       {exams.map((e) => (
                         <option key={e.id} value={e.id}>{e.title}</option>
                       ))}
@@ -1222,27 +1238,113 @@ export function TeacherPanel() {
                 </div>
 
                 {!monitoringExamId ? (
-                  <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
-                    <p className="text-4xl mb-3">📹</p>
-                    <p className="text-gray-500 font-medium">Select an exam above to start monitoring</p>
+                  <div className="text-center py-20 bg-gradient-to-b from-indigo-50 to-white rounded-3xl border-2 border-dashed border-indigo-200">
+                    <p className="text-6xl mb-4">📹</p>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-2">No Exam Selected</h2>
+                    <p className="text-gray-500">Choose an exam above to start live proctoring</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {/* Live student feed */}
-                    <LiveFeed examId={monitoringExamId} />
+                    {/* Live Feed with enhanced styling */}
+                    <div className="rounded-2xl border border-gray-200 overflow-hidden shadow-lg hover:shadow-xl transition-shadow">
+                      <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 px-6 py-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="animate-pulse text-2xl">🔴</span>
+                          <h2 className="text-white font-bold text-lg">Live Student Feed</h2>
+                          <span className="bg-white bg-opacity-20 text-white text-xs px-3 py-1 rounded-full font-semibold">
+                            {monitorSessions.length} Active
+                          </span>
+                        </div>
+                        <span className="text-white text-sm">Last updated: <span className="font-mono font-bold">{new Date().toLocaleTimeString()}</span></span>
+                      </div>
+                      <LiveFeed examId={monitoringExamId} />
+                    </div>
 
-                    {/* Send message / warning panel */}
-                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                      <h2 className="text-lg font-bold text-gray-900 mb-4">📨 Send Message to Students</h2>
+                    {/* Advanced metrics dashboard */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                      <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl border border-green-200 p-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">Active Students</p>
+                            <p className="text-3xl font-bold text-green-700 mt-1">{monitorSessions.filter(s => s.connectionStatus === 'online').length}</p>
+                          </div>
+                          <span className="text-4xl">👥</span>
+                        </div>
+                      </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                      <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-xl border border-yellow-200 p-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-yellow-600 uppercase tracking-wide">Alerts</p>
+                            <p className="text-3xl font-bold text-yellow-700 mt-1">{monitorSessions.filter(s => s.proctoringStatus === 'YELLOW').length}</p>
+                          </div>
+                          <span className="text-4xl">⚠️</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-xl border border-red-200 p-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Critical</p>
+                            <p className="text-3xl font-bold text-red-700 mt-1">{monitorSessions.filter(s => s.proctoringStatus === 'RED').length}</p>
+                          </div>
+                          <span className="text-4xl">🚨</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200 p-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide">Avg Progress</p>
+                            <p className="text-3xl font-bold text-blue-700 mt-1">
+                              {monitorSessions.length > 0 
+                                ? Math.round((monitorSessions.reduce((sum, s) => sum + s.answeredCount, 0) / (monitorSessions.length * 10)) * 100)
+                                : 0
+                              }%
+                            </p>
+                          </div>
+                          <span className="text-4xl">📊</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Communication & Control Panel */}
+                    <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-lg">
+                      <div className="mb-5 pb-5 border-b border-gray-200">
+                        <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                          💬 Real-time Communication Control
+                        </h2>
+                        <p className="text-sm text-gray-500 mt-1">Send targeted messages and warnings to students in real-time</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-5">
+                        {/* Message category buttons - for quick messages */}
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">Quick Preset</label>
+                          <select
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                            onChange={(e) => {
+                              if (e.target.value) {
+                                setMsgText(e.target.value);
+                                e.target.value = '';
+                              }
+                            }}
+                          >
+                            <option value="">—Select—</option>
+                            <option value="Focus on your exam">Focus on your exam</option>
+                            <option value="Time remaining: 10 minutes">Time remaining: 10 minutes</option>
+                            <option value="You are being monitored">You are being monitored</option>
+                            <option value="Stop suspicious activity">Stop suspicious activity</option>
+                          </select>
+                        </div>
+
                         {/* Type selector */}
                         <div>
-                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Type</label>
+                          <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">Message Type</label>
                           <select
                             value={msgType}
                             onChange={(e) => setMsgType(e.target.value as 'message' | 'warning')}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                           >
                             <option value="message">💬 Message</option>
                             <option value="warning">⚠️ Warning</option>
@@ -1251,49 +1353,104 @@ export function TeacherPanel() {
 
                         {/* Target selector */}
                         <div className="sm:col-span-2">
-                          <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Send To</label>
+                          <label className="block text-xs font-semibold text-gray-600 uppercase mb-2">Send To</label>
                           <select
                             value={msgTarget}
                             onChange={(e) => setMsgTarget(e.target.value)}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                           >
-                            <option value="all">All Active Students ({monitorSessions.length})</option>
-                            {monitorSessions.map((s) => (
-                              <option key={s.sessionId} value={s.sessionId}>
-                                {s.studentName} ({s.studentEmail})
-                              </option>
-                            ))}
+                            <option value="all">✓ All Active Students ({monitorSessions.length})</option>
+                            <option value="all_yellow">⚠️ Yellow Status Students ({monitorSessions.filter(s => s.proctoringStatus === 'YELLOW').length})</option>
+                            <option value="all_red">🚨 Red Status Students ({monitorSessions.filter(s => s.proctoringStatus === 'RED').length})</option>
+                            <optgroup label="Individual Students">
+                              {monitorSessions.map((s) => (
+                                <option key={s.sessionId} value={s.sessionId}>
+                                  {s.studentName} • {s.proctoringStatus}
+                                </option>
+                              ))}
+                            </optgroup>
                           </select>
                         </div>
                       </div>
 
-                      {/* Message input */}
+                      {/* Message input with rich formatting */}
                       <div className="flex gap-3">
                         <input
                           type="text"
                           value={msgText}
                           onChange={(e) => setMsgText(e.target.value)}
                           onKeyDown={(e) => e.key === 'Enter' && !msgSending && handleSendMessage()}
-                          placeholder={msgType === 'warning' ? 'Enter warning message...' : 'Enter message to students...'}
-                          className="flex-1 border border-gray-300 rounded-lg px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                          placeholder={msgType === 'warning' ? '⚠️ Type warning message...' : '💬 Type message...'}
+                          className="flex-1 border-2 border-gray-300 rounded-lg px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                         />
                         <button
                           onClick={handleSendMessage}
                           disabled={msgSending || !msgText.trim() || monitorSessions.length === 0}
-                          className={`px-5 py-2 rounded-lg font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                          className={`px-6 py-2.5 rounded-lg font-bold text-sm transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
                             msgType === 'warning'
-                              ? 'bg-orange-500 hover:bg-orange-600 text-white'
-                              : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                              ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-lg shadow-orange-200'
+                              : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-lg shadow-indigo-200'
                           }`}
                         >
-                          {msgSending ? 'Sending…' : msgType === 'warning' ? '⚠️ Send Warning' : '💬 Send'}
+                          {msgSending ? '⏳ Sending…' : msgType === 'warning' ? '⚠️ Send Warning' : '💬 Send'}
                         </button>
                       </div>
 
                       {monitorSessions.length === 0 && (
-                        <p className="text-xs text-gray-400 mt-2">No active students right now — messages will be delivered once students join.</p>
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-xs text-blue-700">ℹ️ No students are currently taking the exam. Messages will queue until students join.</p>
+                        </div>
                       )}
                     </div>
+
+                    {/* Activity timeline for flagged students */}
+                    {monitorSessions.filter(s => s.proctoringStatus !== 'GREEN').length > 0 && (
+                      <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-lg">
+                        <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                          🔍 Flagged Students Activity
+                        </h2>
+                        <div className="space-y-3">
+                          {monitorSessions.filter(s => s.proctoringStatus !== 'GREEN').map((session) => (
+                            <div key={session.sessionId} className={`p-4 rounded-xl border-2 flex items-start gap-4 ${
+                              session.proctoringStatus === 'RED'
+                                ? 'bg-red-50 border-red-300'
+                                : 'bg-yellow-50 border-yellow-300'
+                            }`}>
+                              <div className={`text-2xl`}>
+                                {session.proctoringStatus === 'RED' ? '🚨' : '⚠️'}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h3 className={`font-bold ${session.proctoringStatus === 'RED' ? 'text-red-900' : 'text-yellow-900'}`}>
+                                    {session.studentName}
+                                  </h3>
+                                  <span className={`text-xs px-2 py-1 rounded font-bold ${
+                                    session.proctoringStatus === 'RED'
+                                      ? 'bg-red-200 text-red-800'
+                                      : 'bg-yellow-200 text-yellow-800'
+                                  }`}>
+                                    {session.alertCount} Alert{session.alertCount !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                <p className={`text-xs mt-1 ${session.proctoringStatus === 'RED' ? 'text-red-700' : 'text-yellow-700'}`}>
+                                  Progress: {session.answeredCount}/10 • Time: {Math.floor(session.timeRemaining / 60)}:{String(session.timeRemaining % 60).padStart(2, '0')}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => setMsgTarget(session.sessionId)}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap ${
+                                  session.proctoringStatus === 'RED'
+                                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                                    : 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                }`}
+                              >
+                                Send Message
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

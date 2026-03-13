@@ -22,6 +22,7 @@ import type {
   ChatMessage,
   StudentSession,
   AlertEvent,
+  ActivityEvent,
 } from '../types/chat';
 
 /**
@@ -531,5 +532,56 @@ export const sendMessageToSession = async (
   } catch (error) {
     console.error('Error sending message to session:', error);
     throw error;
+  }
+};
+
+/**
+ * Log a student activity event (suspicious behavior tracking)
+ */
+export const logStudentActivity = async (
+  sessionId: string,
+  type: ActivityEvent['type'],
+  severity: 'normal' | 'warning' | 'critical' = 'normal',
+  details?: string
+): Promise<void> => {
+  try {
+    await addDoc(collection(db, 'live_sessions', sessionId, 'activities'), {
+      type,
+      severity,
+      timestamp: serverTimestamp(),
+      details,
+    });
+  } catch (error) {
+    console.error('Error logging activity:', error);
+  }
+};
+
+/**
+ * Subscribe to live activity feed for a session
+ */
+export const subscribeToSessionActivities = (
+  sessionId: string,
+  callback: (activities: ActivityEvent[]) => void
+) => {
+  try {
+    const q = query(
+      collection(db, 'live_sessions', sessionId, 'activities'),
+      orderBy('timestamp', 'desc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const activities: ActivityEvent[] = snapshot.docs.map((doc) => ({
+        timestamp: doc.data().timestamp,
+        type: doc.data().type as ActivityEvent['type'],
+        severity: doc.data().severity as ActivityEvent['severity'],
+        details: doc.data().details,
+      }));
+      callback(activities);
+    });
+
+    return unsubscribe;
+  } catch (error) {
+    console.error('Error subscribing to activities:', error);
   }
 };
